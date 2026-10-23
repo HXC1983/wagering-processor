@@ -25,3 +25,8 @@ JSON
 awslocal sqs create-queue \
   --queue-name wager-transactions.fifo \
   --attributes file:///tmp/main-queue-attrs.json
+
+# Fila de eventos de integração (publicada pelo worker da outbox)
+awslocal sqs create-queue \
+  --queue-name wager-events.fifo \
+  --attributes FifoQueue=true

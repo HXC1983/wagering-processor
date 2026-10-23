@@ -112,3 +112,16 @@ export function outboxToRow(message: OutboxMessage): OutboxRow {
     publishedAt: s.publishedAt ?? null,
   };
 }
+
+export function outboxFromRow(row: OutboxRow): OutboxMessage {
+  return OutboxMessage.rehydrate({
+    id: row.id,
+    aggregateId: row.aggregateId,
+    eventType: row.eventType,
+    payload: row.payload,
+    occurredAt: row.occurredAt,
+    attempts: row.attempts,
+    nextAttemptAt: row.nextAttemptAt ?? undefined,
+    publishedAt: row.publishedAt ?? undefined,
+  });
+}

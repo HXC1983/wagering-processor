@@ -12,6 +12,7 @@
     "migrate:pending": "bun run src/infrastructure/database/migrate.ts pending"
   },
   "dependencies": {
+    "@aws-sdk/client-sqs": "^3.1156.0",
     "@mikro-orm/core": "6",
     "@mikro-orm/migrations": "6",
     "@mikro-orm/postgresql": "6",
