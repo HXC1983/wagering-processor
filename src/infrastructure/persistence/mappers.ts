@@ -1,12 +1,13 @@
 import { Money } from '../../shared/domain/money';
 import { FailureCode } from '../../wagering/domain/failure-code';
+import { InboxMessage } from '../../wagering/domain/inbox-message';
 import { OutboxMessage } from '../../wagering/domain/outbox-message';
 import { WagerTransaction } from '../../wagering/domain/wager-transaction';
 import { WagerTransactionKind } from '../../wagering/domain/wager-transaction-kind';
 import { WagerTransactionStatus } from '../../wagering/domain/wager-transaction-status';
 import { Wallet } from '../../wallet/domain/wallet';
 import { WalletLedgerEntry } from '../../wallet/domain/wallet-ledger-entry';
-import type { LedgerEntryRow, OutboxRow, WagerTransactionRow, WalletRow } from './schemas';
+import type { InboxRow, LedgerEntryRow, OutboxRow, WagerTransactionRow, WalletRow } from './schemas';
 
 export function walletFromRow(row: WalletRow): Wallet {
   return Wallet.rehydrate({
@@ -124,4 +125,25 @@ export function outboxFromRow(row: OutboxRow): OutboxMessage {
     nextAttemptAt: row.nextAttemptAt ?? undefined,
     publishedAt: row.publishedAt ?? undefined,
   });
+}
+
+export function inboxFromRow(row: InboxRow): InboxMessage {
+  return InboxMessage.rehydrate({
+    messageId: row.messageId,
+    consumerName: row.consumerName,
+    payloadHash: row.payloadHash,
+    receivedAt: row.receivedAt,
+    processedAt: row.processedAt ?? undefined,
+  });
+}
+
+export function inboxToRow(message: InboxMessage): InboxRow {
+  const s = message.toState();
+  return {
+    consumerName: s.consumerName,
+    messageId: s.messageId,
+    payloadHash: s.payloadHash,
+    receivedAt: s.receivedAt,
+    processedAt: s.processedAt ?? null,
+  };
 }

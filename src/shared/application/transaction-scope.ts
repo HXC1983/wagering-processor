@@ -1,3 +1,4 @@
+import type { InboxMessage } from '../../wagering/domain/inbox-message';
 import type { OutboxMessage } from '../../wagering/domain/outbox-message';
 import type { WagerTransaction } from '../../wagering/domain/wager-transaction';
 import type { Wallet } from '../../wallet/domain/wallet';
@@ -15,12 +16,14 @@ export interface TransactionScope {
     providerId: string,
     idempotencyKey: string,
   ): Promise<WagerTransaction | undefined>;
+  findInboxMessage(consumerName: string, messageId: string): Promise<InboxMessage | undefined>;
   insertWallet(wallet: Wallet): Promise<void>;
   /** Atualiza uma wallet já carregada por findWalletForUpdate nesta mesma transação. */
   updateWallet(wallet: Wallet): Promise<void>;
   insertTransaction(transaction: WagerTransaction): Promise<void>;
   insertLedgerEntry(entry: WalletLedgerEntry): Promise<void>;
   insertOutboxMessage(message: OutboxMessage): Promise<void>;
+  insertInboxMessage(message: InboxMessage): Promise<void>;
 }
 
 export interface TransactionRunner {

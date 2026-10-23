@@ -36,3 +36,17 @@ export function queueUrlFor(settings: SqsSettings, queueName: string): string {
 export function eventsQueueUrl(settings: SqsSettings = sqsSettings()): string {
   return process.env.EVENTS_QUEUE_URL ?? queueUrlFor(settings, settings.eventsQueueName);
 }
+
+export function transactionsQueueUrl(settings: SqsSettings = sqsSettings()): string {
+  return (
+    process.env.TRANSACTIONS_QUEUE_URL ??
+    queueUrlFor(settings, process.env.TRANSACTIONS_QUEUE_NAME ?? 'wager-transactions.fifo')
+  );
+}
+
+export function transactionsDlqUrl(settings: SqsSettings = sqsSettings()): string {
+  return (
+    process.env.TRANSACTIONS_DLQ_URL ??
+    queueUrlFor(settings, process.env.TRANSACTIONS_DLQ_NAME ?? 'wager-transactions-dlq.fifo')
+  );
+}

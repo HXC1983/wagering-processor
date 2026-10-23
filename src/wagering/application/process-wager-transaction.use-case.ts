@@ -14,11 +14,12 @@ import { WalletLedgerEntry } from '../../wallet/domain/wallet-ledger-entry';
 import { InvalidTransactionError } from '../domain/errors';
 import { WagerTransactionProcessed, WagerTransactionRejected } from '../domain/events';
 import { FailureCode } from '../domain/failure-code';
+import { InboxMessage } from '../domain/inbox-message';
 import { OutboxMessage } from '../domain/outbox-message';
 import { WagerTransaction } from '../domain/wager-transaction';
 import { WagerTransactionKind } from '../domain/wager-transaction-kind';
 import { WagerTransactionStatus } from '../domain/wager-transaction-status';
-import { IdempotencyConflictError, UnsupportedTransactionKindError } from './errors';
+import { IdempotencyConflictError, InboxConflictError, UnsupportedTransactionKindError } from './errors';
 import { hashPayload } from './payload-hash';
 
 export interface ProcessWagerTransactionCommand {
@@ -43,6 +44,17 @@ export interface ProcessWagerTransactionResult {
   failureCode?: FailureCode;
 }
 
+/** Presente quando a entrada é uma mensagem de fila: o inbox participa da mesma transação SQL. */
+export interface InboxContext {
+  consumerName: string;
+  messageId: string;
+  payloadHash: string;
+}
+
+export interface ProcessOptions {
+  inbox?: InboxContext;
+}
+
 /** Constraints de unicidade que indicam corrida (ou conflito) na idempotência. */
 const IDEMPOTENCY_CONSTRAINTS = new Set([
   'wager_tx_provider_idempotency_uq',
@@ -57,7 +69,10 @@ export class ProcessWagerTransactionUseCase {
     private readonly newId: () => string = randomUUID,
   ) {}
 
-  async execute(command: ProcessWagerTransactionCommand): Promise<ProcessWagerTransactionResult> {
+  async execute(
+    command: ProcessWagerTransactionCommand,
+    options: ProcessOptions = {},
+  ): Promise<ProcessWagerTransactionResult> {
     this.validate(command);
 
     const money = Money.from(command.money);
@@ -104,7 +119,9 @@ export class ProcessWagerTransactionUseCase {
     for (let attempt = 1; ; attempt += 1) {
       try {
         // Uma instância nova por tentativa: a anterior pode ter sido mutada antes do rollback.
-        return await this.runner.run((scope) => this.process(scope, build(), correlationId, now));
+        return await this.runner.run((scope) =>
+          this.process(scope, build(), correlationId, now, options.inbox),
+        );
       } catch (error) {
         const idempotencyRace =
           error instanceof UniqueViolationError && IDEMPOTENCY_CONSTRAINTS.has(error.constraint);
@@ -139,6 +156,7 @@ export class ProcessWagerTransactionUseCase {
     tx: WagerTransaction,
     correlationId: string,
     now: Date,
+    inbox?: InboxContext,
   ): Promise<ProcessWagerTransactionResult> {
     // 1) Trava a wallet ANTES de inserir qualquer linha que a referencie por FK:
     //    inverter essa ordem causaria deadlock entre requisições da mesma wallet.
@@ -147,7 +165,26 @@ export class ProcessWagerTransactionUseCase {
       throw new WalletNotFoundError(`wallet não encontrada: ${tx.walletId}`);
     }
 
-    // 2) Idempotência: com o lock, quem chega depois enxerga o commit de quem chegou antes.
+    // 2) Inbox (só entrada por fila): mensagem já recebida por este consumidor?
+    let alreadyReceived = false;
+    if (inbox) {
+      const received = await scope.findInboxMessage(inbox.consumerName, inbox.messageId);
+      if (received) {
+        alreadyReceived = true;
+        if (received.payloadHash !== inbox.payloadHash) {
+          throw new InboxConflictError(
+            `a messageId ${inbox.messageId} já foi recebida com um payload diferente`,
+          );
+        }
+        // Redelivery: o commit anterior gravou transação e inbox juntos, então só devolvemos o resultado.
+        const done = await scope.findTransactionByIdempotencyKey(tx.providerId, tx.idempotencyKey);
+        if (done) {
+          return this.toResult(done, true, wallet);
+        }
+      }
+    }
+
+    // 3) Idempotência: com o lock, quem chega depois enxerga o commit de quem chegou antes.
     const existing = await scope.findTransactionByIdempotencyKey(tx.providerId, tx.idempotencyKey);
     if (existing) {
       if (!existing.matchesPayload(tx.payloadHash)) {
@@ -155,10 +192,14 @@ export class ProcessWagerTransactionUseCase {
           `a idempotency key ${tx.idempotencyKey} já foi usada com um payload diferente`,
         );
       }
+      // Replay: a mensagem também precisa constar no inbox para a próxima entrega ser reconhecida.
+      if (!alreadyReceived) {
+        await this.recordInbox(scope, inbox, now);
+      }
       return this.toResult(existing, true, wallet);
     }
 
-    // 3) Regra de negócio (domínio) e 4) gravação atômica.
+    // 4) Regra de negócio (domínio) e 5) gravação atômica.
     const entry = this.apply(wallet, tx, now);
 
     await scope.insertTransaction(tx);
@@ -167,8 +208,25 @@ export class ProcessWagerTransactionUseCase {
       await scope.insertLedgerEntry(entry);
     }
     await this.enqueueEvents(scope, wallet, tx, entry, correlationId, now);
+    if (!alreadyReceived) {
+      await this.recordInbox(scope, inbox, now);
+    }
 
     return this.toResult(tx, false, wallet);
+  }
+
+  private async recordInbox(scope: TransactionScope, inbox: InboxContext | undefined, now: Date): Promise<void> {
+    if (!inbox) {
+      return;
+    }
+    const message = InboxMessage.receive({
+      messageId: inbox.messageId,
+      consumerName: inbox.consumerName,
+      payloadHash: inbox.payloadHash,
+      receivedAt: now,
+    });
+    message.markProcessed(now);
+    await scope.insertInboxMessage(message);
   }
 
   /** Aplica a regra. Devolve o lançamento do ledger, ou undefined se o saldo não mudou. */

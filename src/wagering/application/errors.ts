@@ -13,3 +13,8 @@ export class UnsupportedTransactionKindError extends DomainError {
 export class TransactionNotFoundError extends DomainError {
   readonly code = 'TRANSACTION_NOT_FOUND';
 }
+
+/** A mesma messageId reaparece com um payload diferente. */
+export class InboxConflictError extends DomainError {
+  readonly code = 'INBOX_CONFLICT';
+}

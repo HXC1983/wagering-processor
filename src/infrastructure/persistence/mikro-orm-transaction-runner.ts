@@ -5,11 +5,14 @@ import {
   TransactionScope,
   UniqueViolationError,
 } from '../../shared/application/transaction-scope';
+import { InboxMessage } from '../../wagering/domain/inbox-message';
 import { OutboxMessage } from '../../wagering/domain/outbox-message';
 import { WagerTransaction } from '../../wagering/domain/wager-transaction';
 import { Wallet } from '../../wallet/domain/wallet';
 import { WalletLedgerEntry } from '../../wallet/domain/wallet-ledger-entry';
 import {
+  inboxFromRow,
+  inboxToRow,
   ledgerEntryToRow,
   outboxToRow,
   wagerTransactionFromRow,
@@ -18,6 +21,7 @@ import {
   walletToRow,
 } from './mappers';
 import {
+  InboxSchema,
   LedgerEntrySchema,
   OutboxSchema,
   WagerTransactionSchema,
@@ -61,6 +65,11 @@ class MikroOrmTransactionScope implements TransactionScope {
     return row ? wagerTransactionFromRow(row) : undefined;
   }
 
+  async findInboxMessage(consumerName: string, messageId: string): Promise<InboxMessage | undefined> {
+    const row = await this.em.findOne(InboxSchema, { consumerName, messageId });
+    return row ? inboxFromRow(row) : undefined;
+  }
+
   async insertWallet(wallet: Wallet): Promise<void> {
     const row = this.em.create(WalletSchema, walletToRow(wallet));
     this.em.persist(row);
@@ -92,6 +101,11 @@ class MikroOrmTransactionScope implements TransactionScope {
 
   async insertOutboxMessage(message: OutboxMessage): Promise<void> {
     this.em.persist(this.em.create(OutboxSchema, outboxToRow(message)));
+    await this.em.flush();
+  }
+
+  async insertInboxMessage(message: InboxMessage): Promise<void> {
+    this.em.persist(this.em.create(InboxSchema, inboxToRow(message)));
     await this.em.flush();
   }
 }

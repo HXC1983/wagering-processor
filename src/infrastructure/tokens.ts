@@ -5,3 +5,4 @@ export const WAGER_TRANSACTION_READER = Symbol('WAGER_TRANSACTION_READER');
 export const SQS_CLIENT = Symbol('SQS_CLIENT');
 export const EVENT_PUBLISHER = Symbol('EVENT_PUBLISHER');
 export const OUTBOX_RUNNER = Symbol('OUTBOX_RUNNER');
+export const SQS_CONSUMER_CLIENT = Symbol('SQS_CONSUMER_CLIENT');

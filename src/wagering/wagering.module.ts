@@ -13,5 +13,6 @@ import { WageringController } from './presentation/wagering.controller';
       inject: [TRANSACTION_RUNNER],
     },
   ],
+  exports: [ProcessWagerTransactionUseCase],
 })
 export class WageringModule {}
