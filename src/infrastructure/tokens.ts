@@ -1,0 +1,4 @@
+export const MIKRO_ORM = Symbol('MIKRO_ORM');
+export const TRANSACTION_RUNNER = Symbol('TRANSACTION_RUNNER');
+export const WALLET_READER = Symbol('WALLET_READER');
+export const WAGER_TRANSACTION_READER = Symbol('WAGER_TRANSACTION_READER');

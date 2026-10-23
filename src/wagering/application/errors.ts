@@ -9,3 +9,7 @@ export class IdempotencyConflictError extends DomainError {
 export class UnsupportedTransactionKindError extends DomainError {
   readonly code = 'UNSUPPORTED_TRANSACTION_KIND';
 }
+
+export class TransactionNotFoundError extends DomainError {
+  readonly code = 'TRANSACTION_NOT_FOUND';
+}
