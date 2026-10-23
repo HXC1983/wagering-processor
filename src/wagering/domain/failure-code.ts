@@ -10,5 +10,6 @@ export enum FailureCode {
   AmountMismatch = 'AMOUNT_MISMATCH',
   ReversalWouldOverdraw = 'REVERSAL_WOULD_OVERDRAW',
   ReferenceTimeout = 'REFERENCE_TIMEOUT',
+  WalletPlayerMismatch = 'WALLET_PLAYER_MISMATCH',
   InfrastructureFailure = 'INFRASTRUCTURE_FAILURE',
 }

@@ -161,11 +161,13 @@ export class WagerTransaction {
     this._status = WagerTransactionStatus.PendingReference;
   }
 
-  reject(code: FailureCode, at: Date): void {
+  /** observedBalance: saldo da wallet no momento da rejeição (para o replay idempotente). */
+  reject(code: FailureCode, at: Date, observedBalance?: Money): void {
     this.assertNotTerminal('reject');
     this._status = WagerTransactionStatus.Rejected;
     this._failureCode = code;
     this._processedAt = at;
+    this._resultingBalance = observedBalance ?? this._resultingBalance;
   }
 
   fail(code: FailureCode, at: Date): void {
