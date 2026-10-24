@@ -6,3 +6,6 @@ export const SQS_CLIENT = Symbol('SQS_CLIENT');
 export const EVENT_PUBLISHER = Symbol('EVENT_PUBLISHER');
 export const OUTBOX_RUNNER = Symbol('OUTBOX_RUNNER');
 export const SQS_CONSUMER_CLIENT = Symbol('SQS_CONSUMER_CLIENT');
+export const METRICS = Symbol('METRICS');
+export const LEDGER_READER = Symbol('LEDGER_READER');
+export const READINESS_CHECKS = Symbol('READINESS_CHECKS');

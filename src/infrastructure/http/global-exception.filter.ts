@@ -5,6 +5,7 @@ import { DomainError } from '../../shared/domain/domain-error';
 /** Taxonomia de erros -> status HTTP. Erros de domínio sem entrada aqui caem em 422. */
 const STATUS_BY_CODE: Record<string, number> = {
   INVALID_REQUEST: 400,
+  INVALID_CURSOR: 400,
   INVALID_MONEY: 400,
   INVALID_AMOUNT: 400,
   INVALID_WALLET: 400,

@@ -40,3 +40,29 @@ export function requireUuidParam(value: string, name: string): string {
   }
   return value;
 }
+
+/** Parâmetro de query opcional: precisa ser uma string não vazia. */
+export function optionalQuery(value: unknown, name: string): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== 'string' || value === '') {
+    throw new InvalidRequestError(`${name} inválido`);
+  }
+  return value;
+}
+
+export function parseLimit(value: unknown, fallback = 50, max = 200): number {
+  const text = optionalQuery(value, 'limit');
+  if (text === undefined) {
+    return fallback;
+  }
+  if (!/^[0-9]+$/.test(text)) {
+    throw new InvalidRequestError('limit deve ser um inteiro positivo');
+  }
+  const limit = Number(text);
+  if (limit < 1 || limit > max) {
+    throw new InvalidRequestError(`limit deve estar entre 1 e ${max}`);
+  }
+  return limit;
+}
