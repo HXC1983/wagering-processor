@@ -1,4 +1,5 @@
 import type { LogFn } from '../../shared/application/log';
+import { MetricName, Metrics, noopMetrics } from '../../shared/application/metrics';
 import type { EventPublisher, OutboxRunner } from './outbox-ports';
 
 export interface RelayResult {
@@ -11,6 +12,7 @@ export interface OutboxRelayOptions {
   batchSize?: number;
   clock?: () => Date;
   log?: LogFn;
+  metrics?: Metrics;
 }
 
 /**
@@ -21,6 +23,7 @@ export interface OutboxRelayOptions {
 export class OutboxRelay {
   private readonly clock: () => Date;
   private readonly log: LogFn;
+  private readonly metrics: Metrics;
   readonly batchSize: number;
 
   constructor(
@@ -31,6 +34,7 @@ export class OutboxRelay {
     this.batchSize = options.batchSize ?? 20;
     this.clock = options.clock ?? (() => new Date());
     this.log = options.log ?? (() => undefined);
+    this.metrics = options.metrics ?? noopMetrics;
   }
 
   async runOnce(): Promise<RelayResult> {
@@ -42,11 +46,18 @@ export class OutboxRelay {
       for (const message of messages) {
         try {
           await this.publisher.publish(message);
-          message.markPublished(this.clock());
+          const at = this.clock();
+          message.markPublished(at);
           published += 1;
+          // Atraso da outbox: do commit da transação financeira até a publicação.
+          this.metrics.observe(
+            MetricName.OutboxPublishDelayMs,
+            Math.max(0, at.getTime() - message.occurredAt.getTime()),
+          );
         } catch (error) {
           message.scheduleRetry(this.clock());
           failed += 1;
+          this.metrics.increment(MetricName.Retries, { component: 'outbox_publish' });
           this.log('warn', 'outbox publish failed', {
             eventId: message.id,
             eventType: message.eventType,

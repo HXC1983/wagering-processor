@@ -8,6 +8,7 @@ import {
 } from '@aws-sdk/client-sqs';
 import { randomUUID } from 'node:crypto';
 import type { LogFn } from '../../shared/application/log';
+import { MetricName, Metrics, noopMetrics } from '../../shared/application/metrics';
 import type { MessageHandler } from '../../wagering/application/wager-message-handler';
 
 export interface SqsConsumerOptions {
@@ -20,6 +21,7 @@ export interface SqsConsumerOptions {
   backoffBaseSeconds?: number;
   backoffCapSeconds?: number;
   log?: LogFn;
+  metrics?: Metrics;
 }
 
 type Disposition = 'ack' | 'retry';
@@ -35,6 +37,7 @@ export class SqsConsumer {
   private readonly backoffBase: number;
   private readonly backoffCap: number;
   private readonly log: LogFn;
+  private readonly metrics: Metrics;
 
   constructor(
     private readonly client: SQSClient,
@@ -47,6 +50,7 @@ export class SqsConsumer {
     this.backoffBase = options.backoffBaseSeconds ?? 1;
     this.backoffCap = options.backoffCapSeconds ?? 60;
     this.log = options.log ?? (() => undefined);
+    this.metrics = options.metrics ?? noopMetrics;
   }
 
   start(): void {
@@ -122,6 +126,7 @@ export class SqsConsumer {
             await this.sendToDlq(message, 'retries-exhausted', outcome.reason);
             return 'ack';
           }
+          this.metrics.increment(MetricName.Retries, { component: 'sqs_consumer' });
           await this.changeVisibility(message, this.backoffSeconds(receiveCount));
           return 'retry';
       }
@@ -156,6 +161,7 @@ export class SqsConsumer {
       }),
     );
     await this.ack(message);
+    this.metrics.increment(MetricName.DlqMessages, { reason: kind });
     this.log('warn', 'message moved to dlq', { messageId: message.MessageId, kind, reason: reason.slice(0, 200) });
   }
 

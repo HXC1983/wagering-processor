@@ -1,5 +1,5 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException } from '@nestjs/common';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { DomainError } from '../../shared/domain/domain-error';
 
 /** Taxonomia de erros -> status HTTP. Erros de domínio sem entrada aqui caem em 422. */
@@ -50,7 +50,9 @@ function isTransient(error: unknown, depth = 0): boolean {
 @Catch()
 export class GlobalExceptionFilter implements ExceptionFilter {
   catch(exception: unknown, host: ArgumentsHost): void {
-    const res = host.switchToHttp().getResponse<Response>();
+    const http = host.switchToHttp();
+    const res = http.getResponse<Response>();
+    const correlationId = http.getRequest<Request>().headers['x-correlation-id'];
     let status = 500;
     let code = 'INTERNAL_ERROR';
     let message = 'erro interno';
@@ -76,6 +78,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         JSON.stringify({
           level: 'error',
           msg: 'request failed',
+          correlationId,
           code,
           error: exception instanceof Error ? exception.message : String(exception),
         }),

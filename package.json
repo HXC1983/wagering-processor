@@ -9,7 +9,9 @@
     "test": "bun test",
     "migrate:up": "bun run src/infrastructure/database/migrate.ts up",
     "migrate:down": "bun run src/infrastructure/database/migrate.ts down",
-    "migrate:pending": "bun run src/infrastructure/database/migrate.ts pending"
+    "migrate:pending": "bun run src/infrastructure/database/migrate.ts pending",
+    "test:unit": "bun test ./src",
+    "test:integration": "bun test ./test"
   },
   "dependencies": {
     "@aws-sdk/client-sqs": "^3.1156.0",

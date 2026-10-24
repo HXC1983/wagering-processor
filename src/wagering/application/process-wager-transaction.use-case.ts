@@ -1,4 +1,11 @@
 import { randomUUID } from 'node:crypto';
+import type { LogFn } from '../../shared/application/log';
+import {
+  LOCK_CONFLICT_THRESHOLD_MS,
+  MetricName,
+  Metrics,
+  noopMetrics,
+} from '../../shared/application/metrics';
 import {
   TransactionRunner,
   TransactionScope,
@@ -52,6 +59,11 @@ export interface ProcessOptions {
   inbox?: InboxContext;
 }
 
+export interface ProcessDependencies {
+  metrics?: Metrics;
+  log?: LogFn;
+}
+
 /** Constraints de unicidade que indicam corrida (ou conflito) na idempotência. */
 const IDEMPOTENCY_CONSTRAINTS = new Set([
   'wager_tx_provider_idempotency_uq',
@@ -61,18 +73,53 @@ const MAX_ATTEMPTS = 2;
 
 export class ProcessWagerTransactionUseCase {
   private readonly applier: TransactionApplier;
+  private readonly metrics: Metrics;
+  private readonly log: LogFn;
 
   constructor(
     private readonly runner: TransactionRunner,
     private readonly clock: () => Date = () => new Date(),
     private readonly newId: () => string = randomUUID,
+    dependencies: ProcessDependencies = {},
   ) {
     this.applier = new TransactionApplier(this.newId);
+    this.metrics = dependencies.metrics ?? noopMetrics;
+    this.log = dependencies.log ?? (() => undefined);
   }
 
   async execute(
     command: ProcessWagerTransactionCommand,
     options: ProcessOptions = {},
+  ): Promise<ProcessWagerTransactionResult> {
+    const startedAt = performance.now();
+    let outcome = 'ok';
+    try {
+      const result = await this.executeInternal(command, options);
+      if (!options.inbox) {
+        // Entrada por fila já tem o log do consumidor (com a messageId).
+        this.log('info', 'transaction handled', {
+          correlationId: command.correlationId,
+          transactionId: result.transactionId,
+          walletId: command.walletId,
+          providerId: command.providerId,
+          kind: command.kind,
+          status: result.status,
+          replay: result.idempotentReplay,
+          failureCode: result.failureCode,
+        });
+      }
+      return result;
+    } catch (error) {
+      outcome = 'error';
+      throw error;
+    } finally {
+      this.metrics.observe(MetricName.ProcessingMs, performance.now() - startedAt, { outcome });
+    }
+  }
+
+  private async executeInternal(
+    command: ProcessWagerTransactionCommand,
+    options: ProcessOptions,
   ): Promise<ProcessWagerTransactionResult> {
     this.validate(command);
 
@@ -114,15 +161,23 @@ export class ProcessWagerTransactionUseCase {
     for (let attempt = 1; ; attempt += 1) {
       try {
         // Uma instância nova por tentativa: a anterior pode ter sido mutada antes do rollback.
-        return await this.runner.run((scope) =>
+        const result = await this.runner.run((scope) =>
           this.process(scope, build(), correlationId, now, options.inbox),
         );
+        if (!result.idempotentReplay) {
+          this.metrics.increment(MetricName.TransactionsTotal, {
+            status: result.status,
+            kind: command.kind,
+          });
+        }
+        return result;
       } catch (error) {
         const idempotencyRace =
           error instanceof UniqueViolationError && IDEMPOTENCY_CONSTRAINTS.has(error.constraint);
         if (!idempotencyRace) {
           throw error;
         }
+        this.metrics.increment(MetricName.LockConflicts, { kind: 'idempotency_race' });
         // Corrida entre wallets diferentes com a mesma chave: na 2ª tentativa a leitura
         // encontra a transação existente (replay ou conflito).
         if (attempt >= MAX_ATTEMPTS) {
@@ -155,7 +210,13 @@ export class ProcessWagerTransactionUseCase {
   ): Promise<ProcessWagerTransactionResult> {
     // 1) Trava a wallet ANTES de inserir qualquer linha que a referencie por FK:
     //    inverter essa ordem causaria deadlock entre requisições da mesma wallet.
+    const lockStartedAt = performance.now();
     const wallet = await scope.findWalletForUpdate(tx.walletId);
+    const lockWaitMs = performance.now() - lockStartedAt;
+    this.metrics.observe(MetricName.LockWaitMs, lockWaitMs);
+    if (lockWaitMs > LOCK_CONFLICT_THRESHOLD_MS) {
+      this.metrics.increment(MetricName.LockConflicts, { kind: 'wallet_wait' });
+    }
     if (!wallet) {
       throw new WalletNotFoundError(`wallet não encontrada: ${tx.walletId}`);
     }
@@ -174,6 +235,7 @@ export class ProcessWagerTransactionUseCase {
         // Redelivery: o commit anterior gravou transação e inbox juntos, então só devolvemos o resultado.
         const done = await scope.findTransactionByIdempotencyKey(tx.providerId, tx.idempotencyKey);
         if (done) {
+          this.metrics.increment(MetricName.DuplicatesDetected, { source: 'inbox' });
           return this.toResult(done, true, wallet);
         }
       }
@@ -191,6 +253,7 @@ export class ProcessWagerTransactionUseCase {
       if (!alreadyReceived) {
         await this.recordInbox(scope, inbox, now);
       }
+      this.metrics.increment(MetricName.DuplicatesDetected, { source: 'idempotency_key' });
       return this.toResult(existing, true, wallet);
     }
 

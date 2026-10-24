@@ -1,11 +1,12 @@
 import { Module } from '@nestjs/common';
 import type { MikroORM } from '@mikro-orm/postgresql';
 import type { SQSClient } from '@aws-sdk/client-sqs';
+import type { Metrics } from '../../shared/application/metrics';
 import { jsonLog } from '../../shared/infrastructure/logger';
 import type { EventPublisher, OutboxRunner } from '../../wagering/application/outbox-ports';
 import { OutboxRelay } from '../../wagering/application/outbox-relay';
 import { MikroOrmOutboxRunner } from '../persistence/mikro-orm-outbox-runner';
-import { EVENT_PUBLISHER, MIKRO_ORM, OUTBOX_RUNNER, SQS_CLIENT } from '../tokens';
+import { EVENT_PUBLISHER, METRICS, MIKRO_ORM, OUTBOX_RUNNER, SQS_CLIENT } from '../tokens';
 import { OutboxWorker } from './outbox.worker';
 import { SqsEventPublisher } from './sqs-event-publisher';
 import { createSqsClient, eventsQueueUrl } from './sqs.config';
@@ -25,12 +26,13 @@ import { createSqsClient, eventsQueueUrl } from './sqs.config';
     },
     {
       provide: OutboxRelay,
-      useFactory: (runner: OutboxRunner, publisher: EventPublisher) =>
+      useFactory: (runner: OutboxRunner, publisher: EventPublisher, metrics: Metrics) =>
         new OutboxRelay(runner, publisher, {
           batchSize: Number(process.env.OUTBOX_BATCH_SIZE ?? 20),
           log: jsonLog,
+          metrics,
         }),
-      inject: [OUTBOX_RUNNER, EVENT_PUBLISHER],
+      inject: [OUTBOX_RUNNER, EVENT_PUBLISHER, METRICS],
     },
     OutboxWorker,
   ],

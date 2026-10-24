@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import type { MikroORM } from '@mikro-orm/postgresql';
+import type { Metrics } from '../../shared/application/metrics';
 import { jsonLog } from '../../shared/infrastructure/logger';
 import type { TransactionRunner } from '../../shared/application/transaction-scope';
 import {
@@ -7,7 +8,7 @@ import {
   ReprocessPendingReferencesUseCase,
 } from '../../wagering/application/reprocess-pending-references.use-case';
 import { MikroOrmPendingReferenceReader } from '../persistence/mikro-orm-pending-reference-reader';
-import { MIKRO_ORM, PENDING_REFERENCE_READER, TRANSACTION_RUNNER } from '../tokens';
+import { METRICS, MIKRO_ORM, PENDING_REFERENCE_READER, TRANSACTION_RUNNER } from '../tokens';
 import { PendingReferenceWorker } from './pending-reference.worker';
 
 @Module({
@@ -19,12 +20,13 @@ import { PendingReferenceWorker } from './pending-reference.worker';
     },
     {
       provide: ReprocessPendingReferencesUseCase,
-      useFactory: (runner: TransactionRunner, reader: PendingReferenceReader) =>
+      useFactory: (runner: TransactionRunner, reader: PendingReferenceReader, metrics: Metrics) =>
         new ReprocessPendingReferencesUseCase(runner, reader, {
           batchSize: Number(process.env.PENDING_REFERENCE_BATCH_SIZE ?? 20),
           log: jsonLog,
+          metrics,
         }),
-      inject: [TRANSACTION_RUNNER, PENDING_REFERENCE_READER],
+      inject: [TRANSACTION_RUNNER, PENDING_REFERENCE_READER, METRICS],
     },
     PendingReferenceWorker,
   ],

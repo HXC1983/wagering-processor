@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { LogFn } from '../../shared/application/log';
+import { MetricName, Metrics, noopMetrics } from '../../shared/application/metrics';
 import type { TransactionRunner, TransactionScope } from '../../shared/application/transaction-scope';
 import { FailureCode } from '../domain/failure-code';
 import { WagerTransactionStatus } from '../domain/wager-transaction-status';
@@ -26,11 +27,18 @@ export interface ReprocessResult {
 
 type Resolution = 'processed' | 'rejected' | 'pending' | 'skipped';
 
+interface Resolved {
+  resolution: Resolution;
+  status?: string;
+  kind?: string;
+}
+
 export interface ReprocessOptions {
   clock?: () => Date;
   newId?: () => string;
   batchSize?: number;
   log?: LogFn;
+  metrics?: Metrics;
 }
 
 /**
@@ -43,6 +51,7 @@ export class ReprocessPendingReferencesUseCase {
   private readonly clock: () => Date;
   private readonly newId: () => string;
   private readonly log: LogFn;
+  private readonly metrics: Metrics;
   private readonly applier: TransactionApplier;
 
   constructor(
@@ -54,6 +63,7 @@ export class ReprocessPendingReferencesUseCase {
     this.clock = options.clock ?? (() => new Date());
     this.newId = options.newId ?? randomUUID;
     this.log = options.log ?? (() => undefined);
+    this.metrics = options.metrics ?? noopMetrics;
     this.applier = new TransactionApplier(this.newId);
   }
 
@@ -68,9 +78,9 @@ export class ReprocessPendingReferencesUseCase {
     };
 
     for (const candidate of candidates) {
-      let resolution: Resolution;
+      let resolved: Resolved;
       try {
-        resolution = await this.runner.run((scope) => this.resolve(scope, candidate));
+        resolved = await this.runner.run((scope) => this.resolve(scope, candidate));
       } catch (error) {
         this.log('error', 'pending reference reprocess failed', {
           transactionId: candidate.id,
@@ -80,25 +90,36 @@ export class ReprocessPendingReferencesUseCase {
         result.skipped += 1;
         continue;
       }
-      if (resolution === 'processed') result.processed += 1;
-      else if (resolution === 'rejected') result.rejected += 1;
-      else if (resolution === 'pending') result.stillPending += 1;
-      else result.skipped += 1;
+
+      // As métricas só contam depois do commit da transação do worker.
+      if (resolved.resolution === 'processed' || resolved.resolution === 'rejected') {
+        if (resolved.resolution === 'processed') result.processed += 1;
+        else result.rejected += 1;
+        this.metrics.increment(MetricName.TransactionsTotal, {
+          status: resolved.status as string,
+          kind: resolved.kind as string,
+        });
+      } else if (resolved.resolution === 'pending') {
+        result.stillPending += 1;
+        this.metrics.increment(MetricName.Retries, { component: 'pending_reference' });
+      } else {
+        result.skipped += 1;
+      }
     }
     return result;
   }
 
-  private async resolve(scope: TransactionScope, candidate: PendingReferenceCandidate): Promise<Resolution> {
+  private async resolve(scope: TransactionScope, candidate: PendingReferenceCandidate): Promise<Resolved> {
     const at = this.clock();
 
     // 1) Wallet primeiro, 2) transação depois: a mesma ordem de lock da API.
     const wallet = await scope.findWalletForUpdate(candidate.walletId);
     if (!wallet) {
-      return 'skipped';
+      return { resolution: 'skipped' };
     }
     const tx = await scope.findTransactionById(candidate.id);
     if (!tx || !tx.isReferenceRetryDue(at)) {
-      return 'skipped'; // outro worker (ou a API) já resolveu, ou ainda não venceu
+      return { resolution: 'skipped' }; // outro worker (ou a API) já resolveu, ou ainda não venceu
     }
 
     const reference = await scope.findTransactionByExternalId(
@@ -112,7 +133,7 @@ export class ReprocessPendingReferencesUseCase {
       const exhausted = tx.registerReferenceAttempt(at);
       if (!exhausted) {
         await scope.updateTransaction(tx);
-        return 'pending';
+        return { resolution: 'pending' };
       }
       tx.reject(FailureCode.ReferenceNotFound, at, wallet.balance);
       await scope.updateTransaction(tx);
@@ -123,7 +144,7 @@ export class ReprocessPendingReferencesUseCase {
         providerId: tx.providerId,
         attempts: tx.referenceAttempts,
       });
-      return 'rejected';
+      return { resolution: 'rejected', status: tx.status, kind: tx.kind };
     }
 
     await scope.updateTransaction(tx);
@@ -132,7 +153,11 @@ export class ReprocessPendingReferencesUseCase {
       await scope.insertLedgerEntry(outcome.entry);
     }
     await this.emit(scope, wallet, tx, outcome.entry, at);
-    return tx.status === WagerTransactionStatus.Processed ? 'processed' : 'rejected';
+    return {
+      resolution: tx.status === WagerTransactionStatus.Processed ? 'processed' : 'rejected',
+      status: tx.status,
+      kind: tx.kind,
+    };
   }
 
   private async emit(
