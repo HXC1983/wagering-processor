@@ -56,6 +56,8 @@ export function wagerTransactionFromRow(row: WagerTransactionRow): WagerTransact
         ? Money.from({ amount: row.resultingBalance, currency: row.currency })
         : undefined,
     processedAt: row.processedAt ?? undefined,
+    referenceAttempts: row.referenceAttempts,
+    nextReferenceAttemptAt: row.nextReferenceAttemptAt ?? undefined,
   });
 }
 
@@ -79,8 +81,8 @@ export function wagerTransactionToRow(tx: WagerTransaction): WagerTransactionRow
     status: s.status,
     failureCode: s.failureCode ?? null,
     resultingBalance: s.resultingBalance ? s.resultingBalance.toString() : null,
-    referenceAttempts: 0,
-    nextReferenceAttemptAt: null,
+    referenceAttempts: s.referenceAttempts ?? 0,
+    nextReferenceAttemptAt: s.nextReferenceAttemptAt ?? null,
     createdAt: s.createdAt,
     processedAt: s.processedAt ?? null,
   };

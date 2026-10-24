@@ -7,20 +7,17 @@ import {
 import { Money, MoneyProps } from '../../shared/domain/money';
 import { isUuid } from '../../shared/domain/uuid';
 import { WalletNotFoundError } from '../../wallet/application/errors';
-import { InsufficientFundsError } from '../../wallet/domain/errors';
-import { Wallet } from '../../wallet/domain/wallet';
-import { WalletBalanceChanged } from '../../wallet/domain/wallet-balance-changed';
-import { WalletLedgerEntry } from '../../wallet/domain/wallet-ledger-entry';
+import type { Wallet } from '../../wallet/domain/wallet';
 import { InvalidTransactionError } from '../domain/errors';
-import { WagerTransactionProcessed, WagerTransactionRejected } from '../domain/events';
-import { FailureCode } from '../domain/failure-code';
+import type { FailureCode } from '../domain/failure-code';
 import { InboxMessage } from '../domain/inbox-message';
-import { OutboxMessage } from '../domain/outbox-message';
 import { WagerTransaction } from '../domain/wager-transaction';
 import { WagerTransactionKind } from '../domain/wager-transaction-kind';
-import { WagerTransactionStatus } from '../domain/wager-transaction-status';
-import { IdempotencyConflictError, InboxConflictError, UnsupportedTransactionKindError } from './errors';
+import type { WagerTransactionStatus } from '../domain/wager-transaction-status';
+import { IdempotencyConflictError, InboxConflictError } from './errors';
 import { hashPayload } from './payload-hash';
+import { TransactionApplier } from './transaction-applier';
+import { outcomeEvents, pendingReferenceEvent } from './transaction-events';
 
 export interface ProcessWagerTransactionCommand {
   providerId: string;
@@ -63,11 +60,15 @@ const IDEMPOTENCY_CONSTRAINTS = new Set([
 const MAX_ATTEMPTS = 2;
 
 export class ProcessWagerTransactionUseCase {
+  private readonly applier: TransactionApplier;
+
   constructor(
     private readonly runner: TransactionRunner,
     private readonly clock: () => Date = () => new Date(),
     private readonly newId: () => string = randomUUID,
-  ) {}
+  ) {
+    this.applier = new TransactionApplier(this.newId);
+  }
 
   async execute(
     command: ProcessWagerTransactionCommand,
@@ -108,13 +109,7 @@ export class ProcessWagerTransactionUseCase {
         createdAt: now,
       });
 
-    // Validação de contrato antes de tocar no banco (lança InvalidTransactionError).
-    const probe = build();
-    if (probe.requiresReference()) {
-      throw new UnsupportedTransactionKindError(
-        `${probe.kind} ainda não é suportado nesta versão (Bloco E)`,
-      );
-    }
+    build(); // validação de contrato antes de tocar no banco (lança InvalidTransactionError)
 
     for (let attempt = 1; ; attempt += 1) {
       try {
@@ -199,15 +194,29 @@ export class ProcessWagerTransactionUseCase {
       return this.toResult(existing, true, wallet);
     }
 
-    // 4) Regra de negócio (domínio) e 5) gravação atômica.
-    const entry = this.apply(wallet, tx, now);
+    // 4) Referência (REFUND/ROLLBACK) e regras de negócio.
+    const reference = tx.requiresReference()
+      ? await scope.findTransactionByExternalId(tx.providerId, tx.referenceExternalTransactionId as string)
+      : undefined;
+    const existingReversal = reference ? await scope.findProcessedReversalOf(reference.id) : undefined;
+    const outcome = this.applier.apply(wallet, tx, now, reference, existingReversal);
 
-    await scope.insertTransaction(tx);
-    if (entry) {
-      await scope.updateWallet(wallet);
-      await scope.insertLedgerEntry(entry);
+    // 5) Gravação atômica.
+    const eventParams = { wallet, tx, correlationId, now, newId: this.newId };
+    if (outcome.kind === 'waiting') {
+      tx.markPendingReference(now);
+      await scope.insertTransaction(tx);
+      await scope.insertOutboxMessage(pendingReferenceEvent(eventParams));
+    } else {
+      await scope.insertTransaction(tx);
+      if (outcome.entry) {
+        await scope.updateWallet(wallet);
+        await scope.insertLedgerEntry(outcome.entry);
+      }
+      for (const message of outcomeEvents({ ...eventParams, entry: outcome.entry })) {
+        await scope.insertOutboxMessage(message);
+      }
     }
-    await this.enqueueEvents(scope, wallet, tx, entry, correlationId, now);
     if (!alreadyReceived) {
       await this.recordInbox(scope, inbox, now);
     }
@@ -229,66 +238,6 @@ export class ProcessWagerTransactionUseCase {
     await scope.insertInboxMessage(message);
   }
 
-  /** Aplica a regra. Devolve o lançamento do ledger, ou undefined se o saldo não mudou. */
-  private apply(wallet: Wallet, tx: WagerTransaction, now: Date): WalletLedgerEntry | undefined {
-    if (tx.playerId !== wallet.playerId) {
-      tx.reject(FailureCode.WalletPlayerMismatch, now, wallet.balance);
-      return undefined;
-    }
-    if (tx.money.currency !== wallet.currency) {
-      tx.reject(FailureCode.CurrencyMismatch, now, wallet.balance);
-      return undefined;
-    }
-
-    let entry: WalletLedgerEntry | undefined;
-    try {
-      const movement = { amount: tx.money, transactionId: tx.id, entryId: this.newId(), at: now };
-      if (tx.kind === WagerTransactionKind.Bet) {
-        entry = wallet.debit(movement);
-      } else if (tx.kind === WagerTransactionKind.Win) {
-        entry = wallet.credit(movement);
-      }
-      // LOSS: registra o resultado sem mover saldo.
-    } catch (error) {
-      if (error instanceof InsufficientFundsError) {
-        tx.reject(FailureCode.InsufficientFunds, now, wallet.balance);
-        return undefined;
-      }
-      throw error;
-    }
-
-    tx.markProcessed({ at: now, resultingBalance: wallet.balance });
-    return entry;
-  }
-
-  private async enqueueEvents(
-    scope: TransactionScope,
-    wallet: Wallet,
-    tx: WagerTransaction,
-    entry: WalletLedgerEntry | undefined,
-    correlationId: string,
-    now: Date,
-  ): Promise<void> {
-    const context = () => ({
-      eventId: this.newId(),
-      correlationId,
-      causationId: tx.id,
-      occurredAt: now,
-    });
-
-    if (tx.status === WagerTransactionStatus.Processed) {
-      await scope.insertOutboxMessage(OutboxMessage.enqueue(WagerTransactionProcessed.from(tx, context())));
-      if (entry) {
-        // Só quando o saldo muda (LOSS não gera este evento).
-        await scope.insertOutboxMessage(
-          OutboxMessage.enqueue(WalletBalanceChanged.from(wallet, entry, context())),
-        );
-      }
-    } else if (tx.status === WagerTransactionStatus.Rejected) {
-      await scope.insertOutboxMessage(OutboxMessage.enqueue(WagerTransactionRejected.from(tx, context())));
-    }
-  }
-
   private toResult(
     tx: WagerTransaction,
     idempotentReplay: boolean,
@@ -297,7 +246,7 @@ export class ProcessWagerTransactionUseCase {
     const result: ProcessWagerTransactionResult = {
       transactionId: tx.id,
       status: tx.status,
-      // No replay devolvemos o saldo observado na época, e não o saldo atual.
+      // No replay devolvemos o saldo observado na época; pendente: o saldo atual.
       balance: (tx.resultingBalance ?? wallet.balance).toJSON(),
       idempotentReplay,
     };

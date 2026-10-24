@@ -72,3 +72,26 @@ export class WagerTransactionRejected extends IntegrationEvent<WagerTransactionR
     });
   }
 }
+
+export interface WagerTransactionPendingReferenceData extends WagerTransactionEventData {
+  referenceExternalTransactionId: string | null;
+  nextAttemptAt: string | null;
+}
+
+/** REFUND/ROLLBACK recebido antes da transação referenciada. */
+export class WagerTransactionPendingReference extends IntegrationEvent<WagerTransactionPendingReferenceData> {
+  readonly eventType = 'WagerTransactionPendingReference';
+  readonly version = 1;
+
+  static from(tx: WagerTransaction, ctx: EventContext): WagerTransactionPendingReference {
+    return new WagerTransactionPendingReference({
+      ...ctx,
+      aggregateId: tx.walletId,
+      data: {
+        ...baseData(tx),
+        referenceExternalTransactionId: tx.referenceExternalTransactionId ?? null,
+        nextAttemptAt: tx.nextReferenceAttemptAt ? tx.nextReferenceAttemptAt.toISOString() : null,
+      },
+    });
+  }
+}

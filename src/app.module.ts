@@ -4,6 +4,7 @@ import { HealthModule } from './health/health.module';
 import { DatabaseModule } from './infrastructure/database/database.module';
 import { MetricsModule } from './infrastructure/metrics/metrics.module';
 import { OutboxModule } from './infrastructure/messaging/outbox.module';
+import { PendingReferenceModule } from './infrastructure/messaging/pending-reference.module';
 import { SqsConsumerModule } from './infrastructure/messaging/sqs-consumer.module';
 import { AuthGuard } from './shared/infrastructure/auth.guard';
 import { WageringModule } from './wagering/wagering.module';
@@ -16,6 +17,7 @@ import { WalletModule } from './wallet/wallet.module';
     HealthModule,
     OutboxModule,
     SqsConsumerModule,
+    PendingReferenceModule,
     WalletModule,
     WageringModule,
   ],

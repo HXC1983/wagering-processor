@@ -9,3 +9,4 @@ export const SQS_CONSUMER_CLIENT = Symbol('SQS_CONSUMER_CLIENT');
 export const METRICS = Symbol('METRICS');
 export const LEDGER_READER = Symbol('LEDGER_READER');
 export const READINESS_CHECKS = Symbol('READINESS_CHECKS');
+export const PENDING_REFERENCE_READER = Symbol('PENDING_REFERENCE_READER');

@@ -16,11 +16,20 @@ export interface TransactionScope {
     providerId: string,
     idempotencyKey: string,
   ): Promise<WagerTransaction | undefined>;
+  findTransactionByExternalId(
+    providerId: string,
+    externalTransactionId: string,
+  ): Promise<WagerTransaction | undefined>;
+  findTransactionById(transactionId: string): Promise<WagerTransaction | undefined>;
+  /** Reversão (REFUND ou ROLLBACK) já PROCESSADA dessa transação, se houver. */
+  findProcessedReversalOf(referenceTransactionId: string): Promise<WagerTransaction | undefined>;
   findInboxMessage(consumerName: string, messageId: string): Promise<InboxMessage | undefined>;
   insertWallet(wallet: Wallet): Promise<void>;
   /** Atualiza uma wallet já carregada por findWalletForUpdate nesta mesma transação. */
   updateWallet(wallet: Wallet): Promise<void>;
   insertTransaction(transaction: WagerTransaction): Promise<void>;
+  /** Atualiza uma transação já carregada nesta mesma transação (ex.: pendente que foi resolvida). */
+  updateTransaction(transaction: WagerTransaction): Promise<void>;
   insertLedgerEntry(entry: WalletLedgerEntry): Promise<void>;
   insertOutboxMessage(message: OutboxMessage): Promise<void>;
   insertInboxMessage(message: InboxMessage): Promise<void>;

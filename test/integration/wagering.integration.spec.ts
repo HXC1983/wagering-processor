@@ -300,13 +300,16 @@ describe('regras de negócio', () => {
     ).rejects.toThrow(InvalidMoneyError);
   });
 
-  test('REFUND ainda não é suportado (Bloco E)', async () => {
+  test('REFUND sem a referência fica pendente e não altera o saldo', async () => {
     const fixture = await newWallet('100.00');
     const refund = {
       ...command(fixture, `refund-${randomUUID()}`, '10.00', WagerTransactionKind.Refund),
       referenceExternalTransactionId: 'qualquer',
     };
-    await expect(pick(0).processTransaction.execute(refund)).rejects.toThrow(UnsupportedTransactionKindError);
+    const result = await pick(0).processTransaction.execute(refund);
+    expect(result.status).toBe(WagerTransactionStatus.PendingReference);
+    expect(result.balance.amount).toBe('100.00');
+    expect(await storedBalance(fixture.walletId)).toBe('100.00');
   });
 });
 

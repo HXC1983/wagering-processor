@@ -8,6 +8,8 @@ import {
 import { InboxMessage } from '../../wagering/domain/inbox-message';
 import { OutboxMessage } from '../../wagering/domain/outbox-message';
 import { WagerTransaction } from '../../wagering/domain/wager-transaction';
+import { WagerTransactionKind } from '../../wagering/domain/wager-transaction-kind';
+import { WagerTransactionStatus } from '../../wagering/domain/wager-transaction-status';
 import { Wallet } from '../../wallet/domain/wallet';
 import { WalletLedgerEntry } from '../../wallet/domain/wallet-ledger-entry';
 import {
@@ -24,6 +26,7 @@ import {
   InboxSchema,
   LedgerEntrySchema,
   OutboxSchema,
+  WagerTransactionRow,
   WagerTransactionSchema,
   WalletRow,
   WalletSchema,
@@ -39,8 +42,9 @@ function constraintOf(error: UniqueConstraintViolationException): string {
 }
 
 class MikroOrmTransactionScope implements TransactionScope {
-  /** Linhas de wallet já carregadas (e travadas) nesta transação. */
+  /** Linhas já carregadas nesta transação (permitem o update por cópia de campos). */
   private readonly wallets = new Map<string, WalletRow>();
+  private readonly transactions = new Map<string, WagerTransactionRow>();
 
   constructor(private readonly em: EntityManager) {}
 
@@ -61,8 +65,28 @@ class MikroOrmTransactionScope implements TransactionScope {
     providerId: string,
     idempotencyKey: string,
   ): Promise<WagerTransaction | undefined> {
-    const row = await this.em.findOne(WagerTransactionSchema, { providerId, idempotencyKey });
-    return row ? wagerTransactionFromRow(row) : undefined;
+    return this.track(await this.em.findOne(WagerTransactionSchema, { providerId, idempotencyKey }));
+  }
+
+  async findTransactionByExternalId(
+    providerId: string,
+    externalTransactionId: string,
+  ): Promise<WagerTransaction | undefined> {
+    return this.track(await this.em.findOne(WagerTransactionSchema, { providerId, externalTransactionId }));
+  }
+
+  async findTransactionById(transactionId: string): Promise<WagerTransaction | undefined> {
+    return this.track(await this.em.findOne(WagerTransactionSchema, { id: transactionId }));
+  }
+
+  async findProcessedReversalOf(referenceTransactionId: string): Promise<WagerTransaction | undefined> {
+    return this.track(
+      await this.em.findOne(WagerTransactionSchema, {
+        referenceTransactionId,
+        status: WagerTransactionStatus.Processed,
+        kind: { $in: [WagerTransactionKind.Refund, WagerTransactionKind.Rollback] },
+      }),
+    );
   }
 
   async findInboxMessage(consumerName: string, messageId: string): Promise<InboxMessage | undefined> {
@@ -90,7 +114,25 @@ class MikroOrmTransactionScope implements TransactionScope {
 
   // Cada insert faz flush imediato: sem relações mapeadas, a ordem das FKs é a ordem das chamadas.
   async insertTransaction(transaction: WagerTransaction): Promise<void> {
-    this.em.persist(this.em.create(WagerTransactionSchema, wagerTransactionToRow(transaction)));
+    const row = this.em.create(WagerTransactionSchema, wagerTransactionToRow(transaction));
+    this.em.persist(row);
+    await this.em.flush();
+    this.transactions.set(transaction.id, row);
+  }
+
+  async updateTransaction(transaction: WagerTransaction): Promise<void> {
+    const row = this.transactions.get(transaction.id);
+    if (!row) {
+      throw new Error(`transação ${transaction.id} não foi carregada nesta transação`);
+    }
+    const next = wagerTransactionToRow(transaction);
+    row.status = next.status;
+    row.failureCode = next.failureCode;
+    row.resultingBalance = next.resultingBalance;
+    row.processedAt = next.processedAt;
+    row.referenceTransactionId = next.referenceTransactionId;
+    row.referenceAttempts = next.referenceAttempts;
+    row.nextReferenceAttemptAt = next.nextReferenceAttemptAt;
     await this.em.flush();
   }
 
@@ -107,6 +149,14 @@ class MikroOrmTransactionScope implements TransactionScope {
   async insertInboxMessage(message: InboxMessage): Promise<void> {
     this.em.persist(this.em.create(InboxSchema, inboxToRow(message)));
     await this.em.flush();
+  }
+
+  private track(row: WagerTransactionRow | null): WagerTransaction | undefined {
+    if (!row) {
+      return undefined;
+    }
+    this.transactions.set(row.id, row);
+    return wagerTransactionFromRow(row);
   }
 }
 

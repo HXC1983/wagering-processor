@@ -178,7 +178,7 @@ describe('POST /wagering/transactions', () => {
     expect(reply.body.balance.amount).toBe('10.00');
   });
 
-  test('wallet inexistente é 404 e REFUND ainda não suportado é 422', async () => {
+  test('wallet inexistente é 404 e REFUND sem referência fica pendente (202)', async () => {
     const ghost = { walletId: randomUUID(), playerId: randomUUID() };
     const missing = await submit(ghost, `ghost-${randomUUID()}`, '10.00');
     expect(missing.status).toBe(404);
@@ -191,8 +191,8 @@ describe('POST /wagering/transactions', () => {
       { ...betBody(fixture, `refund-${randomUUID()}`, '10.00', 'REFUND'), referenceExternalTransactionId: 'x' },
       { 'Idempotency-Key': `k-${randomUUID()}` },
     );
-    expect(refund.status).toBe(422);
-    expect(refund.body.error.code).toBe('UNSUPPORTED_TRANSACTION_KIND');
+    expect(refund.status).toBe(202);
+    expect(refund.body.status).toBe('PENDING_REFERENCE');
   });
 });
 
