@@ -1,4 +1,4 @@
-# Wagering Processor
+# Wagering Processor ("Processador de apostas")
 
 Serviço financeiro distribuído que processa transações de apostas (`BET`, `WIN`, `LOSS`, `REFUND`
 e `ROLLBACK`) vindas de provedores de jogos, por HTTP e por fila (SQS). O saldo permanece correto
