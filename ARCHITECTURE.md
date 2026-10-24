@@ -179,8 +179,9 @@ sequenceDiagram
 `OPENING` é interno (crédito de abertura da carteira) e não pode ser submetido pela API nem pela
 fila.
 
-**Reversões.** As regras são uma função pura (`evaluateReversal`), avaliada em ordem; a primeira que
-falha decide, e uma rejeição nunca altera o saldo:
+**Reversões.** As regras 1 a 6 são uma função pura (`evaluateReversal`), avaliada em ordem; a regra 7 é
+verificada ao aplicar o lançamento (`TransactionApplier`). A primeira que falha decide, e uma rejeição
+nunca altera o saldo:
 
 | Ordem | Verificação | `failureCode` |
 |---|---|---|
