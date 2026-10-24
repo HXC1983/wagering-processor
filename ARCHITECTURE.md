@@ -201,8 +201,8 @@ um crédito em dobro (por exemplo, `REFUND` e `ROLLBACK` da mesma `BET`).
 **Referências fora de ordem.** Se a referência ainda não existe, a transação é gravada como
 `PENDING_REFERENCE` (resposta 202), com o evento `WagerTransactionPendingReference`. Um worker
 agendado a reprocessa com espera exponencial de 1 s, 2 s, 4 s e assim por diante, com teto de
-60 s, e **no máximo 8 tentativas (cerca de 2 minutos)**. A justificativa: a reordenação de mensagens
-costuma durar segundos, então dois minutos cobrem a janela realista sem deixar a pendência aberta
+60 s, e **no máximo 8 tentativas (cerca de 3 minutos)**. A justificativa: a reordenação de mensagens
+costuma durar segundos, então três minutos cobrem a janela realista sem deixar a pendência aberta
 para sempre. Esgotado o limite, a transação é rejeitada com `REFERENCE_NOT_FOUND` e o evento
 `WagerTransactionRejected` é publicado. Os limites ficam em constantes (`REFERENCE_RETRY`), fáceis de
 ajustar. Uma transação rejeitada é terminal: se a referência chegar depois, o provedor precisa
