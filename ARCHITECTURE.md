@@ -421,3 +421,15 @@ mesmas chaves, e cada aposta aparece exatamente uma vez.
 4. Teste de carga, com a metodologia e a análise honesta do resultado.
 5. Testes de caos (queda do PostgreSQL e partição de rede) e execução em máquinas separadas.
 6. Estudar o limite de throughput da carteira quente e alternativas de particionamento.
+
+## 16. Processo de desenvolvimento
+
+Este projeto foi desenvolvido com o apoio de um assistente de IA (Claude, da Anthropic), usado como parceiro de programação ao longo dos três dias.
+
+**Como a IA foi usada:** discussão da arquitetura e dos trade-offs, geração de código e testes, revisão e redação da documentação, e explicações dos conceitos (concorrência, idempotência, outbox) à medida que apareciam.
+
+**O que eu fiz:** defini o escopo e as prioridades (por exemplo, deixar a autenticação de fora e documentar o desenho), montei o ambiente, executei e li os testes, corrigi problemas, fiz os commits e revisei as decisões. Estudei cada parte para conseguir explicá-la e defendê-la.
+
+**Cuidado com o resultado:** a corretude não depende de confiança no assistente. Ela é verificada por testes automatizados (unitários, de integração com PostgreSQL e SQS reais e de processos com falhas injetadas) e por restrições no próprio banco de dados.
+
+Registro isto de forma explícita por transparência.
